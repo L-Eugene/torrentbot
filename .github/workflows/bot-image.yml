@@ -4,6 +4,7 @@ on:
   push:
     paths:
       - 'bot/**'
+  workflow_dispatch:
 
 jobs:
   build-and-push:
