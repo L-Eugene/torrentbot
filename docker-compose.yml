@@ -15,7 +15,7 @@ services:
       - "6881:6881"
       - "6881:6881/udp"
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:8080/api/v2/app/version || exit 1"]
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/ || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -46,7 +46,7 @@ services:
       -s "downloads;/mnt/downloads;yes;yes;yes"
       -p
     volumes:
-      - ./downloads:/mnt/downloads:ro
+      - ./downloads:/mnt/downloads
     ports:
       - "139:139"
       - "445:445"

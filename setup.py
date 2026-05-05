@@ -102,7 +102,7 @@ def setup_qbittorrent():
       3. Log in with the temporary password and call setPreferences to replace it.
     """
     print('==> Waiting for qBittorrent...')
-    if not wait_for(f'{QBIT_URL}/api/v2/app/version'):
+    if not wait_for(f'{QBIT_URL}/'):
         print('  WARN: qBittorrent not ready, skipping.')
         return
 

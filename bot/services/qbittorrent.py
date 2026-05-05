@@ -20,26 +20,38 @@ class QBittorrentClient:
         if not self._logged_in:
             await self._login()
 
-    async def add_magnet(self, magnet: str) -> bool:
+    def _is_auth_failure(self, resp: httpx.Response) -> bool:
+        return resp.status_code == 403 or resp.text.strip() in ("Forbidden", "")
+
+    async def add_magnet(self, magnet: str, _retry: bool = True) -> bool:
         await self._ensure_logged_in()
         resp = await self._client.post(
             "/api/v2/torrents/add",
             data={"urls": magnet, "savepath": settings.download_path},
         )
+        if self._is_auth_failure(resp) and _retry:
+            self._logged_in = False
+            return await self.add_magnet(magnet, _retry=False)
         return resp.status_code == 200
 
-    async def add_torrent_file(self, content: bytes) -> bool:
+    async def add_torrent_file(self, content: bytes, _retry: bool = True) -> bool:
         await self._ensure_logged_in()
         resp = await self._client.post(
             "/api/v2/torrents/add",
             files={"torrents": ("file.torrent", content, "application/x-bittorrent")},
             data={"savepath": settings.download_path},
         )
+        if self._is_auth_failure(resp) and _retry:
+            self._logged_in = False
+            return await self.add_torrent_file(content, _retry=False)
         return resp.status_code == 200
 
-    async def get_torrents(self) -> list[dict]:
+    async def get_torrents(self, _retry: bool = True) -> list[dict]:
         await self._ensure_logged_in()
         resp = await self._client.get("/api/v2/torrents/info")
+        if self._is_auth_failure(resp) and _retry:
+            self._logged_in = False
+            return await self.get_torrents(_retry=False)
         return resp.json()
 
 
