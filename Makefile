@@ -12,6 +12,3 @@ bot-logs:
 
 restart-bot:
 	docker compose restart telegram-bot
-
-rebuild-bot:
-	docker compose build telegram-bot && docker compose up -d telegram-bot
