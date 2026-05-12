@@ -116,7 +116,11 @@ def setup_qbittorrent():
     data = urllib.parse.urlencode({'username': QBIT_USERNAME, 'password': QBIT_PASSWORD}).encode()
     try:
         resp = opener.open(f'{QBIT_URL}/api/v2/auth/login', data)
-        if resp.read().decode().strip() == 'Ok.':
+
+        status_code = resp.getcode()
+        set_cookie_header = resp.headers.get('Set-Cookie')
+        
+        if 200 <= status_code < 300 and set_cookie_header:
             print('  qBittorrent already configured, skipping.')
             return
     except Exception:
@@ -143,7 +147,11 @@ def setup_qbittorrent():
     data = urllib.parse.urlencode({'username': QBIT_USERNAME, 'password': temp_pass}).encode()
     try:
         resp = opener.open(f'{QBIT_URL}/api/v2/auth/login', data)
-        if resp.read().decode().strip() == 'Ok.':
+        
+        status_code = resp.getcode()
+        set_cookie_header = resp.headers.get('Set-Cookie')
+        
+        if 200 <= status_code < 300 and set_cookie_header:
             prefs = urllib.parse.urlencode({'json': json.dumps({'web_ui_password': QBIT_PASSWORD})}).encode()
             opener.open(f'{QBIT_URL}/api/v2/app/setPreferences', prefs)
             print('  Password set.')
