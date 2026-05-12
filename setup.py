@@ -173,7 +173,7 @@ def _jf(path, data=None, token=None):
         headers['Authorization'] = (
             'MediaBrowser Client="SetupScript", Device="cli", DeviceId="setup", Version="1.0"'
         )
-    body = json.dumps(data).encode() if data is not None else b''
+    body = json.dumps(data).encode() if data is not None else None
     req = urllib.request.Request(f'{JELLYFIN_URL}{path}', data=body, headers=headers)
     try:
         resp = urllib.request.urlopen(req)
@@ -185,18 +185,21 @@ def _jf(path, data=None, token=None):
 def setup_jellyfin():
     """Complete the Jellyfin first-run wizard and add the Downloads media library.
 
-    Jellyfin exposes a one-time startup wizard API that is only accessible before
-    the wizard is marked complete. Subsequent calls return 4xx, which is used to
-    detect an already-configured instance.
+    Uses /System/Info/Public to reliably detect wizard state instead of relying
+    on ambiguous 4xx codes from the wizard endpoints themselves.
 
     Startup wizard API docs: https://api.jellyfin.org/#tag/Startup
 
     Flow:
-      1. POST /Startup/User  — create the admin account.
-      2. POST /Startup/Complete — mark the wizard done (no more wizard on UI).
+      1. GET /System/Info/Public  — check StartupWizardCompleted.
+      2. If wizard pending:
+         a. GET /Startup/User  — seeds the default user record in Jellyfin's DB
+            (required in 10.11+; skipping causes 500 "Sequence contains no elements").
+         b. POST /Startup/User — set admin username and password.
+         c. POST /Startup/Complete — mark wizard done.
       3. POST /Users/AuthenticateByName — obtain an access token.
-      4. POST /Library/VirtualFolders — add /media as the Downloads library.
-         /media is the container path mapped from ./downloads/ on the host.
+      4. GET /Library/VirtualFolders — check if Downloads library exists.
+      5. POST /Library/VirtualFolders — add /media as the Downloads library if absent.
     """
     print('==> Waiting for Jellyfin...')
     if not wait_for(f'{JELLYFIN_URL}/health'):
@@ -205,35 +208,63 @@ def setup_jellyfin():
 
     print('==> Configuring Jellyfin...')
 
-    # Step 1: create the admin user.
-    # Returns 204 only when the wizard is still pending; 4xx means already done.
-    # Docs: https://api.jellyfin.org/#tag/Startup/operation/UpdateStartupUser
-    status, _ = _jf('/Startup/User', {'Name': JELLYFIN_USERNAME, 'Password': JELLYFIN_PASSWORD})
-    if status != 204:
-        print('  Jellyfin already configured, skipping.')
+    # Step 1: check wizard state via public endpoint (no auth required).
+    # Docs: https://api.jellyfin.org/#tag/System/operation/GetPublicSystemInfo
+    status, body = _jf('/System/Info/Public')
+    if status != 200:
+        print(f'  WARN: Could not reach Jellyfin system info ({status}). Skipping.')
         return
+    wizard_completed = json.loads(body).get('StartupWizardCompleted', False)
 
-    # Step 2: mark the wizard as complete.
-    # Docs: https://api.jellyfin.org/#tag/Startup/operation/CompleteWizard
-    _jf('/Startup/Complete')
+    # Step 2: complete the wizard if still pending.
+    if not wizard_completed:
+        # GET must precede POST — it seeds the user record; without it POST 500s.
+        # Docs: https://api.jellyfin.org/#tag/Startup/operation/UpdateStartupUser
+        for attempt in range(1, 11):
+            status, _ = _jf('/Startup/User')
+            if status == 200:
+                break
+            print(f'  Attempt {attempt}/10: GET /Startup/User returned {status}, retrying in 5s...')
+            time.sleep(5)
+        else:
+            print('  WARN: Jellyfin wizard endpoint unavailable after 10 attempts. Configure manually.')
+            return
+
+        status, _ = _jf('/Startup/User', {'Name': JELLYFIN_USERNAME, 'Password': JELLYFIN_PASSWORD})
+        if status != 204:
+            print(f'  WARN: POST /Startup/User returned {status}. Configure Jellyfin manually.')
+            return
+        _jf('/Startup/Complete', {})
+        print('  Wizard completed.')
 
     # Step 3: authenticate to get an access token for library management.
     # Docs: https://api.jellyfin.org/#tag/User/operation/AuthenticateUserByName
     status, body = _jf('/Users/AuthenticateByName', {
         'Username': JELLYFIN_USERNAME, 'Pw': JELLYFIN_PASSWORD,
     })
+    if status != 200:
+        print(f'  WARN: Jellyfin auth failed ({status}). Downloads library not added.')
+        return
     token = json.loads(body)['AccessToken']
 
-    # Step 4: add /media as a mixed-content library called "Downloads".
+    # Step 4: add /media as a mixed-content library called "Downloads" if not already present.
     # collectionType=mixed means Jellyfin will auto-detect movies, shows, music, etc.
     # refreshLibrary=true triggers an immediate scan after creation.
     # Docs: https://api.jellyfin.org/#tag/LibraryStructure/operation/AddVirtualFolder
-    _jf(
-        '/Library/VirtualFolders?name=Downloads&collectionType=mixed&refreshLibrary=true',
-        {'libraryOptions': {'pathInfos': [{'path': '/media'}]}},
-        token=token,
-    )
-    print('  Wizard completed and Downloads library added.')
+    status, body = _jf('/Library/VirtualFolders', token=token)
+    existing = [f['Name'] for f in json.loads(body)] if status == 200 else []
+    if 'Downloads' in existing:
+        print('  Downloads library already exists.')
+    else:
+        _jf(
+            '/Library/VirtualFolders?name=Downloads&collectionType=mixed&refreshLibrary=true',
+            {'libraryOptions': {'pathInfos': [{'path': '/media'}]}},
+            token=token,
+        )
+        print('  Downloads library added.')
+
+    if wizard_completed:
+        print('  Jellyfin was already configured (wizard skipped).')
 
 
 if __name__ == '__main__':
