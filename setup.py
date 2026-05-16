@@ -161,7 +161,7 @@ def setup_qbittorrent():
         print(f'  WARN: {e}')
 
 
-def _jf(path, data=None, token=None):
+def _jf(path, data=None, token=None, method=None):
     """Send a JSON request to the Jellyfin API and return (status, body).
 
     Unauthenticated requests (token=None) use the MediaBrowser identification
@@ -171,7 +171,9 @@ def _jf(path, data=None, token=None):
 
     Jellyfin API reference: https://api.jellyfin.org/
     """
-    headers = {'Content-Type': 'application/json'}
+    headers = {}
+    if data is not None:
+        headers['Content-Type'] = 'application/json'
     if token:
         # Standard bearer-style token for authenticated API calls.
         headers['Authorization'] = f'MediaBrowser Token="{token}"'
@@ -182,7 +184,7 @@ def _jf(path, data=None, token=None):
             'MediaBrowser Client="SetupScript", Device="cli", DeviceId="setup", Version="1.0"'
         )
     body = json.dumps(data).encode() if data is not None else None
-    req = urllib.request.Request(f'{JELLYFIN_URL}{path}', data=body, headers=headers)
+    req = urllib.request.Request(f'{JELLYFIN_URL}{path}', data=body, headers=headers, method=method)
     try:
         resp = urllib.request.urlopen(req)
         return resp.status, resp.read().decode()
@@ -274,6 +276,69 @@ def setup_jellyfin():
     if wizard_completed:
         print('  Jellyfin was already configured (wizard skipped).')
 
+    # Create/retrieve a dedicated Jellyfin API key for the qBittorrent autorun command.
+    # Docs: https://api.jellyfin.org/#tag/ApiKey/operation/CreateKey
+    api_key = None
+    status, body = _jf('/Auth/Keys', token=token)
+    if status == 200:
+        api_key = next(
+            (k['AccessToken'] for k in json.loads(body).get('Items', []) if k.get('AppName') == 'TorrentBot'),
+            None,
+        )
+    if not api_key:
+        _jf('/Auth/Keys?app=TorrentBot', method='POST', token=token)
+        status, body = _jf('/Auth/Keys', token=token)
+        if status == 200:
+            api_key = next(
+                (k['AccessToken'] for k in json.loads(body).get('Items', []) if k.get('AppName') == 'TorrentBot'),
+                None,
+            )
+    if api_key:
+        print('  Jellyfin API key ready.')
+    else:
+        print('  WARN: Could not create Jellyfin API key.')
+    return api_key
+
+
+def setup_autorun(api_key):
+    """Configure qBittorrent to trigger a Jellyfin library scan on torrent completion.
+
+    Uses qBittorrent's built-in autorun feature (Preferences > Run external program
+    on torrent completion). The autorun command calls the Jellyfin /Library/Refresh
+    endpoint using a dedicated API key created during Jellyfin setup.
+
+    qBittorrent API docs:
+    https://github.com/qbittorrent/qBittorrent/wiki/WebUI-API-(qBittorrent-4.1)#set-application-preferences
+    Jellyfin Library/Refresh docs: https://api.jellyfin.org/#tag/Library/operation/RefreshLibrary
+    """
+    if not api_key:
+        print('  WARN: No Jellyfin API key available; skipping autorun setup.')
+        return
+
+    print('==> Configuring qBittorrent autorun...')
+
+    cj = http.cookiejar.CookieJar()
+    opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cj))
+    data = urllib.parse.urlencode({'username': QBIT_USERNAME, 'password': QBIT_PASSWORD}).encode()
+    try:
+        opener.open(f'{QBIT_URL}/api/v2/auth/login', data)
+    except Exception as e:
+        print(f'  WARN: qBittorrent auth failed: {e}')
+        return
+
+    autorun_cmd = (
+        f'curl -s -X POST "{JELLYFIN_URL}/Library/Refresh"'
+        f' -H "Authorization: MediaBrowser Token=\\"{{api_key}}\\""'
+    ).format(api_key=api_key)
+    prefs = urllib.parse.urlencode({
+        'json': json.dumps({'autorun_enabled': True, 'autorun_program': autorun_cmd}),
+    }).encode()
+    try:
+        opener.open(f'{QBIT_URL}/api/v2/app/setPreferences', prefs)
+        print('  qBittorrent autorun configured.')
+    except Exception as e:
+        print(f'  WARN: Could not configure autorun: {e}')
+
 
 if __name__ == '__main__':
     # Skip everything if a previous run already completed successfully.
@@ -282,7 +347,8 @@ if __name__ == '__main__':
         sys.exit(0)
 
     setup_qbittorrent()
-    setup_jellyfin()
+    api_key = setup_jellyfin()
+    setup_autorun(api_key)
 
     # Write the sentinel only after both steps succeed so a partial failure
     # causes a full retry on the next container start.
