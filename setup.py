@@ -259,7 +259,7 @@ def setup_jellyfin():
         if status == 200:
             token = json.loads(body)['AccessToken']
             break
-        print(f'  Attempt {attempt}/10: Jellyfin auth returned {status}, retrying in 5s...')
+        print(f'  Attempt {attempt}/10: Jellyfin auth returned {status}: {body[:200]}, retrying in 5s...')
         time.sleep(5)
     if not token:
         print(f'  WARN: Jellyfin auth failed after 10 attempts. Downloads library not added.')
