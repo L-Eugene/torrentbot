@@ -248,14 +248,22 @@ def setup_jellyfin():
         print('  Wizard completed.')
 
     # Step 3: authenticate to get an access token for library management.
+    # Retry because Jellyfin can return 500 briefly after wizard completion or
+    # restart while its user DB finishes initializing.
     # Docs: https://api.jellyfin.org/#tag/User/operation/AuthenticateUserByName
-    status, body = _jf('/Users/AuthenticateByName', {
-        'Username': JELLYFIN_USERNAME, 'Pw': JELLYFIN_PASSWORD,
-    })
-    if status != 200:
-        print(f'  WARN: Jellyfin auth failed ({status}). Downloads library not added.')
+    token = None
+    for attempt in range(1, 11):
+        status, body = _jf('/Users/AuthenticateByName', {
+            'Username': JELLYFIN_USERNAME, 'Pw': JELLYFIN_PASSWORD,
+        })
+        if status == 200:
+            token = json.loads(body)['AccessToken']
+            break
+        print(f'  Attempt {attempt}/10: Jellyfin auth returned {status}, retrying in 5s...')
+        time.sleep(5)
+    if not token:
+        print(f'  WARN: Jellyfin auth failed after 10 attempts. Downloads library not added.')
         return
-    token = json.loads(body)['AccessToken']
 
     # Step 4: add /media as a mixed-content library called "Downloads" if not already present.
     # collectionType=mixed means Jellyfin will auto-detect movies, shows, music, etc.
