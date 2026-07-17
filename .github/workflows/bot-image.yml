@@ -32,10 +32,10 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           # metadata-action lowercases the repository name automatically,
-          # producing e.g. ghcr.io/l-eugene/torrentbot
+          # producing e.g. ghcr.io/okslo/torrentbot
           images: ghcr.io/${{ github.repository }}
           tags: |
-            # short git SHA for every push, e.g. ghcr.io/l-eugene/torrentbot:abc1234
+            # short git SHA for every push, e.g. ghcr.io/okslo/torrentbot:abc1234
             type=sha,prefix=
             # 'latest' only on the default branch
             type=raw,value=latest,enable={{is_default_branch}}

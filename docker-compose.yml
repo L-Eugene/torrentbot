@@ -23,7 +23,7 @@ services:
     restart: unless-stopped
 
   telegram-bot:
-    image: ghcr.io/l-eugene/torrentbot:latest
+    image: ghcr.io/okslo/torrentbot:latest
     container_name: telegram-bot
     environment:
       - BOT_TOKEN=${BOT_TOKEN}

@@ -21,7 +21,7 @@ Self-hosted media stack: a Telegram bot that accepts magnet links and torrent fi
 **1. Clone the repository**
 
 ```bash
-git clone https://github.com/L-Eugene/torrentbot.git
+git clone https://github.com/OksLo/torrentbot.git
 cd torrentbot
 ```
 
